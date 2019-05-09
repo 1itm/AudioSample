@@ -1,51 +1,75 @@
 <html>
   <head>
     <meta charset="UTF-8">
-    <title>端到端语音合成及其优化实践(上)</title>
+    <title>Audio Samples from mandarin TTS model based on Google's Tacotron</title>
   </head>
   <body>
     <article>
       <header>
-        <h1>端到端语音合成及其优化实践(上)</h1>
+        <h1>Audio Samples from mandarin TTS model based on Google's Tacotron</h1>
       </header>
     </article>
 
     <div>
-	  <h2>前言</h2>
-<p>语音合成系统分为前端和后端，前端负责分词、词性、多音字标注等文本特征信息提取；后端模块根据前端提取的文本特征完成语音生成。从技术角度，传统后端模块又可以细分为拼接系统和参数系统，拼接系统和参数系统各有优缺点，详细对比可以参照 AI Talk 的上一篇文章 <a href="https://zhuanlan.zhihu.com/p/36737737">基于深度学习的语音合成技术进展</a> 。</P>
-
-<p>传统的语音合成系统，都是相对复杂的系统，比如，前端模块需要较强的语言学背景知识，不同语言的语言学知识差异明显，需要特定领域的专家支持，增加了系统构建的难度。参数系统的后端模块需要对语音的发声机理以及信号处理有一定的了解。由于传统参数系统建模时存在信息损失，限制了合成语音表现力的进一步提升。而拼接系统则对语音数据库要求较高，同时，需要人工介入制定很多挑选规则和参数，以保证拼接合成的效果和稳定性。</P>
-
-<p>这些问题促使端到端语音合成的出现，研究者希望能够合成系统能够尽量的简化，减少人工干预和对语言学相关背景知识的要求。端到端合成系统直接输入文本或者注音字符，系统输出音频波形。前端模块得到极大简化，甚至可以直接省略掉。端到端合成系统相比于传统语音合成，降低了对语言学知识的要求，可以方便的在不同语种上复制，批量实现几十种甚至更多语种的合成系统。借助于深度学习模型的强表达能力，端到端语音合成系统表现出令人惊艳的合成效果和强大丰富的发音风格与韵律表现力。</P>
-
-<p>本文将向您介绍云知声在端到端语音合成方向的探索和尝试，这其中既包括对已有算法的理解和复现、又包括云知声结合自身对算法的调整和改进。如果您是语音合成爱好者，希望了解语音合成行业发展和最新技术的现状，建议您试听文中附带 Samples，这些 Samples 代表这当前实验室环境下，语音合成韵律和音质的最佳水平。如果您是语音合成或机器学习从业者，希望了解技术细节，建议您从头阅读文章，如有问题欢迎留言或私信。</P>
-	  <h2>Tacotron</h2>
-<p>Tacotron 是第一个真正意义上端到端的语音合成系统，它输入合成文本或者注音串，输出 Linear-Spectrum ，再经过 Griffin-Lim 转换为波形，一套系统完成语音合成的全部流程。</P>
-        
-	  <div align="center"><img src="images/tacotron.jpg"  alt="Tacotron" width="800px" height="500px"/></div>
-	  <div align="center">图1: Tacotron 模型结构</div>
-<p>图1 记录了 Tacotron 的整体结构，黄色代表输入，绿色代表输出，蓝色代表网络。网络部分大体可分为 4 部分，分别是左：Encoder、中：Attention、右下：Decoder、右上：Post-processing。其中 Encoder 和 Post-processing 都包含一个被称为 CBHG 的结构，CBHG 结构的详细介绍可以参照上一篇文章 “基于深度学习的语音合成技术进展” 。Encoder、Attention、Decoder 共同构成了经典的 Seq2seq 结构，所以 Tacotron 也可以看做是一个 Seq2seq + Post-processing 的混合网络。</p>
-<p>Tacotron 输入可以有多种选择，以中文和英文合成系统为例：</P>
-<div style="text-indent:2em">
-<p>1. 英文文本，训练英文模型，最直观的想法是直接将英文文本当做输入，<a href="https://arxiv.org/abs/1703.10135">Tacotron1</a> 也是这么做的。但这样可能会引入一些问题，比如未登录词发音问题。</P>
-<p>2. 英文注音符，用英文注音符(比如  <a href="http://www.speech.cs.cmu.edu/cgi-bin/cmudict">CMUDict</a> )作为输入可以提高发音稳定性，除了注音词典，还可以引入注音前端，增强对模型的控制。
-中文拼音，由于中文汉字数量多，且存在大量多音字，直接通过文本训练</P>
-<p>3. 中文拼音，由于中文汉字数量多，且存在大量多音字，直接通过文本训练是不现实的。所以我们退而求其次，通过拼音训练模型，拼音有注音前端生成，既去掉了汉字的冗余发音又提高了模型的可控性。</P>
-<p>4. 中文|英文 <a href="http://www.internationalphoneticalphabet.org/">IPA (International Phonetic Alphabet)</a> 音标，IPA 音标是一种更强的注音体系，一套注音体系可以标注多种语言。对于中文，IPA 音标的标注粒度比拼音更细，实验中，我们观察到用 IPA 作为输入，可以略微提升对齐稳定性。另外，在中文发音人+英文发音人混合训练试验中，我们观察到了一个有意思的现象：由于中英文 IPA 标注中共享了部分发音单元，导致跨语种发音人可以学会对方的语言，也就是中文发音人可以合成英文，英文发音人可以合成中文。在这个联合学习过程中存在着迁移学习的味道。</P>
-</div>
-<p>Post-processing 模块：Post-processing 是另一个很重要的模块，在 Tacotron + WaveNet Vocoder 框架下，Post-processing 模块的输入是 Seq2Seq 模块输出的 Mel-Spectrum，输出是也是 Mel-Spectrum，看起来多此一举，但却有意义。Seq2Seq 的框架决定了 Decoder 只能看见前面的若干帧，它对未来一无所知，而 Post-processing 则可以看见前后若干帧，参考信息更多，理论上生成质量也更高。我们可以在实验中观察 Post-processing 的作用。 下图中，从上到下依次是，Post-processing 输出 Mel-spec；Decoder 输出 Mel-spec；对齐。可以看到 Post-processing 输出的 Mel-spec 更平滑高频细节还原更清晰。</P>
-    <div align="center"><img src="images/mel_plot.png"  alt="mel" width="800px" height="60%"/></div>
-	<div align="center">图2: 上：Post-processing Mel-Spectrum  中：Seq2Seq Mel-Spectrum 下：Attention</div>
+	  <h2>Introduction</h2>
+        <p> (update at May 9, 2019)</P>
+        <p>This speech synthesis model is developed from Google's Tacotron model(<a href="https://arxiv.org/abs/1703.10135">arXiv</a>), and trained by Biaobei open source database(contains 10h female clear recordings). After 100k-steps training, this model has been able to synthesize relatively influence and vivid speech and able to deal with most context conditions. However, due to the limited data volume and insufficient training(I think), there still are unnatural rhythm and perceptible current sound in synthesized audios. Since this project is on going yet, I believe significant improvement will be made soon. Following are selected samples:</P>
 	</div>
-	  <h3>实时解码 tricks (CPU)</h3>
-<p>在 <a href="https://arxiv.org/abs/1703.10135">Tacotron1</a> 中，作者使用 Griffin-Lim 算法，从 Linear-Spectrum 中恢复相位，再通过 ISTFT 还原波形，Griffin-Lim 的优点是算法简单，可以快速建立调研环境，缺点是速度慢，很难在 CPU 上做到实时，无法实时解码也就意味着系统无法在生产环境使用。</P>
+    <div>
+	  <h2>Samples</h2>
+        <div>
+            <h3>Emotional rhythm</h3>
+            <table>
+             <tr><td class="transcript">"行车不规范，亲人两行泪"</td></tr>
+             <tr><td><audio controls><source src="samples/1-1.wav"></audio></td></tr>
+            </table>
 
-<p>幸运的是我们可以找到一些稍显复杂但有效的方法，加速解码。</P>
-	  <h3>Samples</h3>
-	  <table>
-        <tr><td class="taotron_gl_sample" id="Tacotron_gl">Taotron + Griffin-Lim</td></tr>
-        <tr><td><audio controls><source src="samples/20170821__6.mp3"></audio></td></tr>
-      </table>
-<p>你觉得上面的 Samples 听感如何呢？韵律还不错，音质乍一听也还好，但似乎又有些问题，主要表现在沉闷，不锐利。</P>
+            <table>
+             <tr><td class="transcript">"吉林大学位于吉林省会长春"</td></tr>
+             <tr><td><audio controls><source src="samples/1-2.wav"></audio></td></tr>
+            </table>
+            <br />
+        </div>
+
+        <div>
+            <h3>Even mouthful sentences</h3>
+            <table>
+             <tr><td class="transcript">"刘奶奶找牛奶奶买榴莲牛奶"</td></tr>
+             <tr><td><audio controls><source src="samples/2-1.wav"></audio></td></tr>
+            </table>
+
+            <table>
+             <tr><td class="transcript">"吃葡萄不吐葡萄皮不吃葡萄倒吐葡萄皮"</td></tr>
+             <tr><td><audio controls><source src="samples/2-2.wav"></audio></td></tr>
+            </table>
+            <br />
+        </div>
+
+        <div>
+            <h3>Practical application</h3>
+                    <div>(Synthesize dub for an introduction video.)</div>
+            <table>
+             <tr><td class="transcript">"测区为待测区域，发射源位置放置发射机，测线与测点位置按照设计书规定进行布置，放置接收机。 面积测量时，如测区范围内发现有意义的异常时，应及时加密测线。 如因测深曲线异常或失去连续性，也应加密测线。 另外，测点尽可能不选在山顶或者深沟处。应选择相对开阔，地势平坦的地方布置发射机。 布置结束后，操作员需检查各通道信号，并根据信号大小选择前置放大器的增益，确定无误后，方可进行测量和记录。 测量完毕后，对所得数据进行处理及反演解释，得到有用信息。"</td></tr>
+             <tr><td><audio controls><source src="samples/4.wav"></audio></td></tr>
+            </table>
+            <br />
+        </div>
+    </div>
+
+    <div>
+        <h2>Nevertheless</h2>
+        <p>When trying to synthesize a sentences with special terms or phrases that unlikely to appeared in training database, there will be some troubles. It is hard for a 10-hours young model to read a text that she don't know what it is talking about.</p>
+        <table>
+             <tr><td class="transcript">"哈佛大学用生成式对抗网络和遗传算法创造图片控制猴子大脑"</td></tr>
+             <tr><td class="transcript">("Harvard University use Generative Adversarial Network and Genetic Algorithm to create picture to control Monkey's brain.")</td></tr>
+             <tr><td><audio controls><source src="samples/5-1.wav"></audio></td></tr>
+            </table>
+
+            <table>
+             <tr><td class="transcript">"国际计算语言学协会年度会议本周正式在墨尔本开幕。"</td></tr>
+                <tr><td class="transcript">("The annual meeting of Association for Computational Linguistics officially opened this week in Melbourne")</td></tr>
+             <tr><td><audio controls><source src="samples/5-2.wav"></audio></td></tr>
+            </table>
+    </div>
   </body>
 </html>

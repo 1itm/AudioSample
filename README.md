@@ -1,1 +1,1 @@
-This is a page for synthesized audio samples
+Page for synthesized audio samples
